@@ -67,6 +67,18 @@ blueprint:
       default: true
       selector:
         boolean:
+    enable_entity:
+      name: Enable entity (optional)
+      description: >
+        Optional input_boolean or switch acting as a master enable.
+        If specified, the automation only acts while this entity is
+        on. If left blank, the automation always runs.
+      default:
+      selector:
+        entity:
+          domain:
+            - input_boolean
+            - switch
 
 mode: single
 max_exceeded: silent
@@ -76,6 +88,7 @@ variables:
   threshold: !input threshold
   switches: !input switches
   require_any_on: !input require_any_on
+  enable_entity: !input enable_entity
 
 trigger:
   - platform: template
@@ -89,6 +102,10 @@ condition:
     value_template: >
       {{ (not require_any_on)
          or (switches | select('is_state', 'on') | list | length > 0) }}
+  - condition: template
+    value_template: >
+      {{ enable_entity in [none, '']
+         or is_state(enable_entity, 'on') }}
 
 action:
   - action: homeassistant.turn_off
