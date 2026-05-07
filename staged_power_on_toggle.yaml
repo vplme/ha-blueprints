@@ -1,0 +1,121 @@
+blueprint:
+  name: Staged Power-On via Toggle
+  description: >
+    Watches a toggle (input_boolean or any switch). When turned ON,
+    powers on a list of switches sequentially with a configurable
+    delay between each — useful for desk setups, AV stacks, or
+    anything with multiple switching power supplies sharing a
+    circuit, where simultaneous inrush current can trip a breaker.
+    When turned OFF, switches are powered down all at once
+    (or in reverse with a delay, configurable).
+  domain: automation
+  source_url: https://github.com/vplme/ha-blueprints/blob/main/staged_power_on_toggle.yaml
+  input:
+    toggle:
+      name: Toggle entity
+      description: >
+        The entity that triggers the sequence. Typically an
+        input_boolean helper, but any on/off entity works.
+      selector:
+        entity:
+          domain:
+            - input_boolean
+            - switch
+    targets:
+      name: Switches to control
+      description: >
+        Switches will be turned ON in the order listed.
+        Put the most important device (e.g. dock) first.
+      selector:
+        entity:
+          domain: switch
+          multiple: true
+    stagger_delay_on:
+      name: Delay between switches (on)
+      description: Seconds to wait between turning on each switch.
+      default: 1
+      selector:
+        number:
+          min: 0.5
+          max: 10
+          step: 0.5
+          unit_of_measurement: seconds
+          mode: slider
+    off_behavior:
+      name: Power-off behavior
+      description: >
+        How to turn switches off. "All at once" is fine for most
+        setups. "Reverse staged" mirrors the on-sequence in reverse,
+        useful if downstream devices need graceful shutdown order.
+      default: all_at_once
+      selector:
+        select:
+          options:
+            - label: All at once
+              value: all_at_once
+            - label: Reverse staged
+              value: reverse_staged
+    stagger_delay_off:
+      name: Delay between switches (off, reverse staged only)
+      description: >
+        Only used if "Reverse staged" is selected above.
+      default: 1
+      selector:
+        number:
+          min: 0.5
+          max: 10
+          step: 0.5
+          unit_of_measurement: seconds
+          mode: slider
+
+mode: restart
+max_exceeded: silent
+
+variables:
+  targets: !input targets
+  off_behavior: !input off_behavior
+
+trigger:
+  - platform: state
+    entity_id: !input toggle
+    to: "on"
+    id: turn_on
+  - platform: state
+    entity_id: !input toggle
+    to: "off"
+    id: turn_off
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: turn_on
+        sequence:
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - action: switch.turn_on
+                  target:
+                    entity_id: "{{ repeat.item }}"
+                - delay:
+                    seconds: !input stagger_delay_on
+      - conditions:
+          - condition: trigger
+            id: turn_off
+        sequence:
+          - choose:
+              - conditions:
+                  - "{{ off_behavior == 'reverse_staged' }}"
+                sequence:
+                  - repeat:
+                      for_each: "{{ targets | reverse | list }}"
+                      sequence:
+                        - action: switch.turn_off
+                          target:
+                            entity_id: "{{ repeat.item }}"
+                        - delay:
+                            seconds: !input stagger_delay_off
+            default:
+              - action: switch.turn_off
+                target:
+                  entity_id: "{{ targets }}"
