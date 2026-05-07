@@ -1,0 +1,96 @@
+blueprint:
+  name: Auto-Off Below Combined Power Threshold
+  description: >
+    Watches a list of power sensors. When their summed value has
+    stayed below a configurable threshold for a configurable
+    duration, turns off a list of switches/toggles. Useful for
+    desk/AV stacks where idle or asleep power is well below active
+    draw — once the master device drops to idle for long enough,
+    accessories (dock, monitors, speakers) shut off automatically.
+  domain: automation
+  source_url: https://github.com/vplme/ha-blueprints/blob/main/auto_off_below_power_threshold.yaml
+  input:
+    power_sensors:
+      name: Power sensors
+      description: >
+        One or more sensors whose states are summed and compared
+        to the threshold. Unavailable sensors contribute 0.
+      selector:
+        entity:
+          domain: sensor
+          multiple: true
+    threshold:
+      name: Threshold (W)
+      description: >
+        When the summed power stays strictly below this value for
+        the duration below, the switches are turned off.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 1
+          unit_of_measurement: W
+          mode: box
+    below_for:
+      name: Duration below threshold
+      description: >
+        How long the sum must remain below the threshold before
+        switches are turned off. A brief dip (e.g. a momentary
+        idle) won't trigger the automation.
+      default:
+        hours: 0
+        minutes: 5
+        seconds: 0
+      selector:
+        duration: {}
+    switches:
+      name: Switches to turn off
+      description: >
+        Entities to turn off when the threshold condition is met.
+        Multiple domains supported via homeassistant.turn_off.
+      selector:
+        entity:
+          domain:
+            - switch
+            - input_boolean
+            - light
+            - fan
+            - media_player
+          multiple: true
+    require_any_on:
+      name: Only fire if any target is on
+      description: >
+        When enabled, the automation runs only if at least one of
+        the target entities is currently on. Prevents redundant
+        turn_off calls once everything is already off.
+      default: true
+      selector:
+        boolean:
+
+mode: single
+max_exceeded: silent
+
+variables:
+  power_sensors: !input power_sensors
+  threshold: !input threshold
+  switches: !input switches
+  require_any_on: !input require_any_on
+
+trigger:
+  - platform: template
+    value_template: >
+      {{ (power_sensors | map('states') | map('float', 0) | sum)
+         < (threshold | float) }}
+    for: !input below_for
+
+condition:
+  - condition: template
+    value_template: >
+      {{ (not require_any_on)
+         or (switches | select('is_state', 'on') | list | length > 0) }}
+
+action:
+  - action: homeassistant.turn_off
+    target:
+      entity_id: !input switches
