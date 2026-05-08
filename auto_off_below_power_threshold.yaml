@@ -91,10 +91,11 @@ variables:
   enable_entity: !input enable_entity
 
 trigger:
-  - platform: template
+  - platform: numeric_state
+    entity_id: !input power_sensors
     value_template: >
-      {{ (power_sensors | map('states') | map('float', 0) | sum)
-         < (threshold | float) }}
+      {{ power_sensors | map('states') | map('float', 0) | sum }}
+    below: !input threshold
     for: !input below_for
 
 condition:
