@@ -83,6 +83,9 @@ blueprint:
 mode: single
 max_exceeded: silent
 
+trigger_variables:
+  power_sensors: !input power_sensors
+
 variables:
   power_sensors: !input power_sensors
   threshold: !input threshold
