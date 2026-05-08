@@ -85,6 +85,7 @@ max_exceeded: silent
 
 trigger_variables:
   power_sensors: !input power_sensors
+  threshold: !input threshold
 
 variables:
   power_sensors: !input power_sensors
@@ -94,11 +95,10 @@ variables:
   enable_entity: !input enable_entity
 
 trigger:
-  - platform: numeric_state
-    entity_id: !input power_sensors
+  - platform: template
     value_template: >
-      {{ power_sensors | map('states') | map('float', 0) | sum }}
-    below: !input threshold
+      {{ expand(power_sensors) | map(attribute='state') | map('float', 0) | sum
+         < (threshold | float) }}
     for: !input below_for
 
 condition:
