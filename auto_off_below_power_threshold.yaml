@@ -7,6 +7,11 @@ blueprint:
     desk/AV stacks where idle or asleep power is well below active
     draw — once the master device drops to idle for long enough,
     accessories (dock, monitors, speakers) shut off automatically.
+
+    Optionally mirrors power-on across the targets: when any one
+    target is turned on, the rest are turned on too — along with a
+    button/toggle helper that drives a power-on workflow — so the
+    whole stack stays in sync.
   domain: automation
   source_url: https://github.com/vplme/ha-blueprints/blob/main/auto_off_below_power_threshold.yaml
   input:
@@ -79,6 +84,30 @@ blueprint:
           domain:
             - input_boolean
             - switch
+    mirror_on:
+      name: Mirror power-on across targets
+      description: >
+        When enabled, turning ON any one of the target switches
+        turns ON the rest as well (and the helper below, if set).
+        Pairs with the auto-off behaviour so the whole stack moves
+        together.
+      default: false
+      selector:
+        boolean:
+    mirror_helper:
+      name: Workflow helper to keep in sync (optional)
+      description: >
+        The button/toggle helper that triggers your power-on
+        workflow (e.g. the toggle used by the "Staged Power-On"
+        blueprint). When a target is turned on and mirroring is
+        enabled, this helper is turned on too so its state stays
+        consistent. Leave blank to skip.
+      default:
+      selector:
+        entity:
+          domain:
+            - input_boolean
+            - switch
 
 mode: single
 max_exceeded: silent
@@ -93,25 +122,52 @@ variables:
   switches: !input switches
   require_any_on: !input require_any_on
   enable_entity: !input enable_entity
+  mirror_on: !input mirror_on
+  mirror_helper: !input mirror_helper
 
 trigger:
   - platform: template
+    id: power_below
     value_template: >
       {{ expand(power_sensors) | map(attribute='state') | map('float', 0) | sum
          < (threshold | float) }}
     for: !input below_for
-
-condition:
-  - condition: template
-    value_template: >
-      {{ (not require_any_on)
-         or (switches | select('is_state', 'on') | list | length > 0) }}
-  - condition: template
-    value_template: >
-      {{ enable_entity in [none, '']
-         or is_state(enable_entity, 'on') }}
+  - platform: state
+    id: mirrored_on
+    entity_id: !input switches
+    to: "on"
 
 action:
-  - action: homeassistant.turn_off
-    target:
-      entity_id: !input switches
+  - choose:
+      # Auto-off: summed power has stayed below the threshold.
+      - conditions:
+          - condition: trigger
+            id: power_below
+          - condition: template
+            value_template: >
+              {{ (not require_any_on)
+                 or (switches | select('is_state', 'on') | list | length > 0) }}
+          - condition: template
+            value_template: >
+              {{ enable_entity in [none, '']
+                 or is_state(enable_entity, 'on') }}
+        sequence:
+          - action: homeassistant.turn_off
+            target:
+              entity_id: !input switches
+      # Mirror-on: a target was switched on, bring the rest along.
+      - conditions:
+          - condition: trigger
+            id: mirrored_on
+          - condition: template
+            value_template: "{{ mirror_on }}"
+          - condition: template
+            value_template: >
+              {{ enable_entity in [none, '']
+                 or is_state(enable_entity, 'on') }}
+        sequence:
+          - action: homeassistant.turn_on
+            target:
+              entity_id: >
+                {{ switches
+                   + ([mirror_helper] if mirror_helper not in [none, ''] else []) }}
