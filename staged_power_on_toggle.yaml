@@ -8,6 +8,11 @@ blueprint:
     circuit, where simultaneous inrush current can trip a breaker.
     When turned OFF, switches are powered down all at once
     (or in reverse with a delay, configurable).
+
+    Optionally mirrors a manual power-on: if you switch on any one
+    of the target switches directly, the toggle is flipped ON for
+    you, which cascades the staged power-on to the rest — so the
+    whole stack comes up together no matter which switch you touch.
   domain: automation
   source_url: https://github.com/vplme/ha-blueprints/blob/main/staged_power_on_toggle.yaml
   input:
@@ -67,13 +72,31 @@ blueprint:
           step: 0.5
           unit_of_measurement: seconds
           mode: slider
+    mirror_manual_on:
+      name: Mirror manual power-on
+      description: >
+        When enabled, switching on any one of the target switches
+        directly (while the toggle is off) flips the toggle ON,
+        which cascades the staged power-on to the rest. Leave off
+        if you only ever drive the stack from the toggle.
+      default: false
+      selector:
+        boolean:
 
-mode: restart
+# queued (not restart) so a manual-on mirror can't cancel an
+# in-progress staged power-on/off mid-sequence.
+mode: queued
 max_exceeded: silent
 
+trigger_variables:
+  toggle: !input toggle
+  targets: !input targets
+
 variables:
+  toggle: !input toggle
   targets: !input targets
   off_behavior: !input off_behavior
+  mirror_manual_on: !input mirror_manual_on
 
 trigger:
   - platform: state
@@ -84,9 +107,35 @@ trigger:
     entity_id: !input toggle
     to: "off"
     id: turn_off
+  # A target was switched on directly while the toggle is off —
+  # i.e. a manual power-on. (Stays false while the toggle is on, so
+  # it never fires during our own staging.)
+  - platform: template
+    id: manual_on
+    value_template: >
+      {{ is_state(toggle, 'off')
+         and (targets | select('is_state', 'on') | list | length > 0) }}
 
 action:
   - choose:
+      # Mirror a manual power-on: flip the toggle on, which cascades
+      # the staged power-on to the rest of the targets. The toggle
+      # last_changed guard ignores stale events queued during a
+      # power-off (toggle just flipped) so we don't fight a shutdown.
+      - conditions:
+          - condition: trigger
+            id: manual_on
+          - condition: template
+            value_template: "{{ mirror_manual_on }}"
+          - condition: template
+            value_template: >
+              {{ is_state(toggle, 'off')
+                 and states[toggle] is not none
+                 and (now() - states[toggle].last_changed).total_seconds() > 5 }}
+        sequence:
+          - action: homeassistant.turn_on
+            target:
+              entity_id: !input toggle
       - conditions:
           - condition: trigger
             id: turn_on
